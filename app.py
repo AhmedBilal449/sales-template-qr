@@ -23,11 +23,32 @@ class ImageGenerator:
         self.FONT_SIZE_LARGE = 24  # For product name
         self.FONT_SIZE_MEDIUM = 20 # For prices
         
-        # Try to load a font, fallback to default
+        # Try to load Rosario font, fallback to default
         try:
-            self.font_large = ImageFont.truetype("arial.ttf", self.FONT_SIZE_LARGE)
-            self.font_medium = ImageFont.truetype("arial.ttf", self.FONT_SIZE_MEDIUM)
+            # Try different possible paths for Rosario font
+            font_paths = [
+                "rosario.ttf",
+                "Rosario-Regular.ttf", 
+                "Rosario.ttf",
+                "C:/Windows/Fonts/Rosario-Regular.ttf",
+                "C:/Windows/Fonts/rosario.ttf"
+            ]
+            
+            font_found = False
+            for font_path in font_paths:
+                try:
+                    self.font_large = ImageFont.truetype(font_path, self.FONT_SIZE_LARGE)
+                    self.font_medium = ImageFont.truetype(font_path, self.FONT_SIZE_MEDIUM)
+                    font_found = True
+                    break
+                except:
+                    continue
+            
+            if not font_found:
+                raise Exception("Rosario font not found")
+                
         except:
+            # Fallback to default font
             self.font_large = ImageFont.load_default()
             self.font_medium = ImageFont.load_default()
     
