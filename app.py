@@ -20,37 +20,68 @@ class ImageGenerator:
         self.QR_SIZE = (160, 160) # QR code size
         
         # Font settings
-        self.FONT_SIZE_LARGE = 24  # For product name
+        self.FONT_SIZE_LARGE = 28  # For product name
         self.FONT_SIZE_MEDIUM = 20 # For prices
         
-        # Try to load Rosario font, fallback to default
+        # Store font paths for dynamic loading
+        self.font_paths = [
+            "rosario.ttf",
+            "Rosario-Regular.ttf", 
+            "Rosario.ttf",
+            "C:/Windows/Fonts/Rosario-Regular.ttf",
+            "C:/Windows/Fonts/rosario.ttf"
+        ]
+        
+        # Cache for loaded fonts to avoid reloading
+        self._font_cache = {}
+    
+    def get_font(self, size: int) -> ImageFont.ImageFont:
+        """Get font with specified size, using cache for performance"""
+        cache_key = f"font_{size}"
+        
+        if cache_key in self._font_cache:
+            return self._font_cache[cache_key]
+        
+        # Try to load Rosario font with the specified size
+        font_found = False
+        for font_path in self.font_paths:
+            try:
+                font = ImageFont.truetype(font_path, size)
+                self._font_cache[cache_key] = font
+                return font
+            except:
+                continue
+        
+        # Fallback to Arial if Rosario not found
         try:
-            # Try different possible paths for Rosario font
-            font_paths = [
-                "rosario.ttf",
-                "Rosario-Regular.ttf", 
-                "Rosario.ttf",
-                "C:/Windows/Fonts/Rosario-Regular.ttf",
-                "C:/Windows/Fonts/rosario.ttf"
-            ]
-            
-            font_found = False
-            for font_path in font_paths:
-                try:
-                    self.font_large = ImageFont.truetype(font_path, self.FONT_SIZE_LARGE)
-                    self.font_medium = ImageFont.truetype(font_path, self.FONT_SIZE_MEDIUM)
-                    font_found = True
-                    break
-                except:
-                    continue
-            
-            if not font_found:
-                raise Exception("Rosario font not found")
-                
+            font = ImageFont.truetype("arial.ttf", size)
+            self._font_cache[cache_key] = font
+            return font
         except:
-            # Fallback to default font
-            self.font_large = ImageFont.load_default()
-            self.font_medium = ImageFont.load_default()
+            # Final fallback - load default font
+            font = ImageFont.load_default()
+            self._font_cache[cache_key] = font
+            return font
+    
+    def get_large_font(self) -> ImageFont.ImageFont:
+        """Get large font using current FONT_SIZE_LARGE setting"""
+        return self.get_font(self.FONT_SIZE_LARGE)
+    
+    def get_medium_font(self) -> ImageFont.ImageFont:
+        """Get medium font using current FONT_SIZE_MEDIUM setting"""
+        return self.get_font(self.FONT_SIZE_MEDIUM)
+    
+    def clear_font_cache(self):
+        """Clear font cache - useful when font sizes are changed"""
+        self._font_cache.clear()
+    
+    def update_font_sizes(self, large_size: int = None, medium_size: int = None):
+        """Update font sizes and clear cache"""
+        if large_size is not None:
+            self.FONT_SIZE_LARGE = large_size
+        if medium_size is not None:
+            self.FONT_SIZE_MEDIUM = medium_size
+        self.clear_font_cache()
     
     def create_qr_code(self, url: str) -> Image.Image:
         """Generate QR code from URL"""
@@ -58,7 +89,7 @@ class ImageGenerator:
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
             box_size=10,
-            border=4,
+            border=1,
         )
         qr.add_data(url)
         qr.make(fit=True)
@@ -66,11 +97,41 @@ class ImageGenerator:
         qr_img = qr.make_image(fill_color="black", back_color="white")
         return qr_img.resize(self.QR_SIZE, Image.Resampling.LANCZOS)
     
-    def truncate_text(self, text: str, max_length: int = 30) -> str:
-        """Truncate text if too long"""
-        if len(text) > max_length:
-            return text[:max_length-3] + "..."
-        return text
+    def wrap_text(self, text: str, max_chars_per_line: int = 25) -> List[str]:
+        """Wrap text into multiple lines if too long"""
+        if len(text) <= max_chars_per_line:
+            return [text]
+        
+        # Split text into words
+        words = text.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            # If adding this word would exceed the limit, start a new line
+            if len(current_line + " " + word) > max_chars_per_line and current_line:
+                lines.append(current_line.strip())
+                current_line = word
+            else:
+                if current_line:
+                    current_line += " " + word
+                else:
+                    current_line = word
+        
+        # Add the last line if it has content
+        if current_line:
+            lines.append(current_line.strip())
+        
+        # Limit to 2 lines maximum
+        if len(lines) > 2:
+            lines = lines[:2]
+            # If we had to cut off text, add ellipsis to the second line
+            if len(lines[1]) > max_chars_per_line - 3:
+                lines[1] = lines[1][:max_chars_per_line-3] + "..."
+            else:
+                lines[1] = lines[1] + "..."
+        
+        return lines
     
     def slugify(self, text: str) -> str:
         """Convert text to filename-safe string"""
@@ -85,15 +146,19 @@ class ImageGenerator:
             img = template_img.copy()
             draw = ImageDraw.Draw(img)
             
-            # Truncate text if needed
-            name_text = self.truncate_text(str(name), 25)
+            # Wrap text if needed
+            name_lines = self.wrap_text(str(name), 25)
             price_text = str(price)
             rrp_text = str(rrp)
             
-            # Draw text overlays
-            draw.text(self.NAME_POS, name_text, fill="black", font=self.font_large)
-            draw.text(self.RRP_POS, f"RRP: ${rrp_text}", fill="black", font=self.font_medium)
-            draw.text(self.NOW_POS, f"Now: ${price_text}", fill="red", font=self.font_medium)
+            # Draw text overlays using dynamic font sizing
+            # Draw name text (potentially multi-line)
+            name_font = self.get_large_font()
+            for i, line in enumerate(name_lines):
+                line_y = self.NAME_POS[1] + (i * (self.FONT_SIZE_LARGE + 2))  # Add small line spacing
+                draw.text((self.NAME_POS[0], line_y), line, fill="black", font=name_font)
+            draw.text(self.RRP_POS, f"RRP: ${rrp_text}", fill="black", font=self.get_medium_font())
+            draw.text(self.NOW_POS, f"Now: ${price_text}", fill="red", font=self.get_large_font())
             
             # Generate and paste QR code
             qr_img = self.create_qr_code(str(url))
