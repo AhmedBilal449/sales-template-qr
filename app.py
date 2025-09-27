@@ -16,7 +16,7 @@ class ImageGenerator:
         self.NAME_POS = (15, 100)  # Top left area for product name
         self.RRP_POS = (15, 170)  # RRP price position
         self.NOW_POS = (15, 200)  # Current price position
-        self.QR_POS = (190, 155)   # QR code position
+        self.QR_POS = (190, 165)   # QR code position
         self.QR_SIZE = (160, 160) # QR code size
         
         # Font settings
@@ -32,19 +32,30 @@ class ImageGenerator:
             "C:/Windows/Fonts/rosario.ttf"
         ]
         
+        # Store bold font paths for dynamic loading
+        self.bold_font_paths = [
+            "rosario-bold.ttf",
+            "Rosario-Bold.ttf",
+            "C:/Windows/Fonts/Rosario-Bold.ttf",
+            "C:/Windows/Fonts/arial-bold.ttf",
+            "C:/Windows/Fonts/arialbd.ttf"
+        ]
+        
         # Cache for loaded fonts to avoid reloading
         self._font_cache = {}
     
-    def get_font(self, size: int) -> ImageFont.ImageFont:
-        """Get font with specified size, using cache for performance"""
-        cache_key = f"font_{size}"
+    def get_font(self, size: int, bold: bool = False) -> ImageFont.ImageFont:
+        """Get font with specified size and weight, using cache for performance"""
+        cache_key = f"font_{size}_{'bold' if bold else 'regular'}"
         
         if cache_key in self._font_cache:
             return self._font_cache[cache_key]
         
-        # Try to load Rosario font with the specified size
-        font_found = False
-        for font_path in self.font_paths:
+        # Choose font paths based on whether bold is requested
+        font_paths = self.bold_font_paths if bold else self.font_paths
+        
+        # Try to load font with the specified size and weight
+        for font_path in font_paths:
             try:
                 font = ImageFont.truetype(font_path, size)
                 self._font_cache[cache_key] = font
@@ -52,24 +63,28 @@ class ImageGenerator:
             except:
                 continue
         
-        # Fallback to Arial if Rosario not found
-        try:
-            font = ImageFont.truetype("arial.ttf", size)
-            self._font_cache[cache_key] = font
-            return font
-        except:
-            # Final fallback - load default font
-            font = ImageFont.load_default()
-            self._font_cache[cache_key] = font
-            return font
+        # Fallback fonts
+        fallback_fonts = ["arialbd.ttf", "arial-bold.ttf"] if bold else ["arial.ttf"]
+        for fallback in fallback_fonts:
+            try:
+                font = ImageFont.truetype(fallback, size)
+                self._font_cache[cache_key] = font
+                return font
+            except:
+                continue
+        
+        # Final fallback - load default font
+        font = ImageFont.load_default()
+        self._font_cache[cache_key] = font
+        return font
     
-    def get_large_font(self) -> ImageFont.ImageFont:
+    def get_large_font(self, bold: bool = False) -> ImageFont.ImageFont:
         """Get large font using current FONT_SIZE_LARGE setting"""
-        return self.get_font(self.FONT_SIZE_LARGE)
+        return self.get_font(self.FONT_SIZE_LARGE, bold)
     
-    def get_medium_font(self) -> ImageFont.ImageFont:
+    def get_medium_font(self, bold: bool = False) -> ImageFont.ImageFont:
         """Get medium font using current FONT_SIZE_MEDIUM setting"""
-        return self.get_font(self.FONT_SIZE_MEDIUM)
+        return self.get_font(self.FONT_SIZE_MEDIUM, bold)
     
     def clear_font_cache(self):
         """Clear font cache - useful when font sizes are changed"""
@@ -151,14 +166,15 @@ class ImageGenerator:
             price_text = str(price)
             rrp_text = str(rrp)
             
-            # Draw text overlays using dynamic font sizing
-            # Draw name text (potentially multi-line)
-            name_font = self.get_large_font()
+            # Draw text overlays using dynamic font sizing with bold fonts
+            # Draw name text (potentially multi-line) - use bold large font
+            name_font = self.get_large_font(bold=True)
             for i, line in enumerate(name_lines):
                 line_y = self.NAME_POS[1] + (i * (self.FONT_SIZE_LARGE + 2))  # Add small line spacing
                 draw.text((self.NAME_POS[0], line_y), line, fill="black", font=name_font)
-            draw.text(self.RRP_POS, f"RRP: ${rrp_text}", fill="black", font=self.get_medium_font())
-            draw.text(self.NOW_POS, f"Now: ${price_text}", fill="red", font=self.get_large_font())
+            # Draw prices with bold fonts
+            draw.text(self.RRP_POS, f"RRP: ${rrp_text}", fill="black", font=self.get_medium_font(bold=True))
+            draw.text(self.NOW_POS, f"Now: ${price_text}", fill="red", font=self.get_large_font(bold=True))
             
             # Generate and paste QR code
             qr_img = self.create_qr_code(str(url))
