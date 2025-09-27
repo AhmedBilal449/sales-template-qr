@@ -8,6 +8,7 @@ import tempfile
 import shutil
 from typing import List, Tuple, Optional
 import re
+import math
 
 class ImageGenerator:
     def __init__(self):
@@ -288,6 +289,114 @@ class ImageGenerator:
             
         except Exception as e:
             return None, f"❌ Error processing files: {str(e)}"
+    
+    def create_a4_layout(self, zip_file) -> Tuple[Optional[str], str]:
+        """Create A4 layouts with 12 images per page from a ZIP file"""
+        if zip_file is None:
+            return None, "❌ Please upload a ZIP file containing images"
+        
+        try:
+            # A4 dimensions at 300 DPI (standard print resolution)
+            A4_WIDTH = 2480  # 8.27 inches * 300 DPI
+            A4_HEIGHT = 3508  # 11.69 inches * 300 DPI
+            
+            # Margins (0.5 inch on each side)
+            MARGIN = 150  # 0.5 inch * 300 DPI
+            
+            # Calculate available space for images
+            available_width = A4_WIDTH - (2 * MARGIN)
+            available_height = A4_HEIGHT - (2 * MARGIN)
+            
+            # 12 images in 3 columns x 4 rows
+            COLS = 3
+            ROWS = 4
+            IMAGES_PER_PAGE = COLS * ROWS
+            
+            # Calculate image size with small gaps between images
+            GAP = 20  # Small gap between images
+            image_width = (available_width - (GAP * (COLS - 1))) // COLS
+            image_height = (available_height - (GAP * (ROWS - 1))) // ROWS
+            
+            # Extract images from ZIP
+            temp_dir = tempfile.mkdtemp()
+            extract_dir = os.path.join(temp_dir, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+            
+            image_files = []
+            with zipfile.ZipFile(zip_file.name, 'r') as zipf:
+                for file_info in zipf.filelist:
+                    if file_info.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        zipf.extract(file_info, extract_dir)
+                        image_files.append(os.path.join(extract_dir, file_info.filename))
+            
+            if not image_files:
+                return None, "❌ No image files found in the ZIP archive"
+            
+            # Sort image files for consistent ordering
+            image_files.sort()
+            
+            log_messages = []
+            log_messages.append(f"📊 Found {len(image_files)} images in ZIP file")
+            log_messages.append(f"📄 Creating A4 layouts with {IMAGES_PER_PAGE} images per page")
+            log_messages.append(f"🖼️ Each image will be {image_width}x{image_height} pixels")
+            
+            # Calculate number of pages needed
+            num_pages = math.ceil(len(image_files) / IMAGES_PER_PAGE)
+            log_messages.append(f"📑 Will create {num_pages} A4 page(s)")
+            
+            # Create A4 layout pages
+            a4_pages = []
+            for page_num in range(num_pages):
+                # Create blank A4 page
+                a4_page = Image.new('RGB', (A4_WIDTH, A4_HEIGHT), 'white')
+                
+                # Calculate which images go on this page
+                start_idx = page_num * IMAGES_PER_PAGE
+                end_idx = min(start_idx + IMAGES_PER_PAGE, len(image_files))
+                page_images = image_files[start_idx:end_idx]
+                
+                # Place images on the page
+                for i, img_path in enumerate(page_images):
+                    try:
+                        # Calculate position
+                        row = i // COLS
+                        col = i % COLS
+                        
+                        x = MARGIN + col * (image_width + GAP)
+                        y = MARGIN + row * (image_height + GAP)
+                        
+                        # Load and resize image
+                        img = Image.open(img_path)
+                        img_resized = img.resize((image_width, image_height), Image.Resampling.LANCZOS)
+                        
+                        # Paste image onto A4 page
+                        a4_page.paste(img_resized, (x, y))
+                        
+                    except Exception as e:
+                        log_messages.append(f"⚠️ Error processing image {os.path.basename(img_path)}: {str(e)}")
+                        continue
+                
+                # Save A4 page
+                page_filename = f"A4_Layout_Page_{page_num + 1:02d}.png"
+                page_path = os.path.join(temp_dir, page_filename)
+                a4_page.save(page_path, "PNG", dpi=(300, 300))
+                a4_pages.append(page_path)
+                
+                log_messages.append(f"✅ Created page {page_num + 1} with {len(page_images)} images")
+            
+            # Create ZIP file with A4 layouts
+            zip_path = os.path.join(temp_dir, "A4_Layouts.zip")
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for page_path in a4_pages:
+                    zipf.write(page_path, os.path.basename(page_path))
+            
+            log_messages.append(f"📦 Created ZIP file with {len(a4_pages)} A4 layout page(s)")
+            log_messages.append("🖨️ Ready for high-quality printing at 300 DPI")
+            
+            return zip_path, "\n".join(log_messages)
+            
+        except Exception as e:
+            return None, f"❌ Error creating A4 layout: {str(e)}"
 
 def create_interface():
     """Create Gradio interface"""
@@ -297,70 +406,138 @@ def create_interface():
         gr.Markdown("# 🖼️ CSV to Template Image Generator")
         gr.Markdown("Upload a CSV file and template image to generate batch images with QR codes")
         
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("### 📄 Upload Files")
-                csv_file = gr.File(
-                    label="CSV File", 
-                    file_types=[".csv"]
-                )
-                template_file = gr.File(
-                    label="Template Image", 
-                    file_types=[".jpg", ".jpeg", ".png"]
-                )
-                
-                generate_btn = gr.Button("🚀 Generate Images", variant="primary", size="lg")
+        with gr.Tabs():
+            with gr.TabItem("🎯 Generate Images"):
+                create_image_generation_tab(generator)
             
-            with gr.Column():
-                gr.Markdown("### 📋 Expected CSV Format")
-                gr.Textbox(
-                    value="""Name,URL,Price,RRP
-Nival Blanco Matt 30x60,https://tilemania.com/nival-blanco,15.00,35
-Carrara Marble Gloss 60x60,https://tilemania.com/carrara-marble,25.50,45""",
-                    label="CSV Format Example (Prices will be formatted as £XX.XX/m²)",
-                    lines=3,
-                    interactive=False
-                )
-        
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("### 📊 Processing Log")
-                log_output = gr.Textbox(
-                    label="Generation Log", 
-                    lines=10, 
-                    max_lines=20
-                )
-            
-            with gr.Column():
-                gr.Markdown("### 📦 Download")
-                download_file = gr.File(
-                    label="Generated Images (ZIP)", 
-                    interactive=False
-                )
-        
-        # Event handler
-        generate_btn.click(
-            fn=generator.process_csv_and_generate,
-            inputs=[csv_file, template_file],
-            outputs=[download_file, log_output]
-        )
-        
-        gr.Markdown("""
-        ### 📝 Instructions:
-        1. **CSV File**: Upload a CSV with columns for Name, URL/Link, Price, and RRP
-        2. **Template Image**: Upload your template image (like Ref.jpg)
-        3. **Generate**: Click the generate button to create batch images
-        4. **Download**: Get the ZIP file with all generated images
-        
-        ### 🎯 Features:
-        - Flexible column name detection (Name/Product, URL/Link, Price/Now, RRP/Was)
-        - QR code generation from URLs
-        - Text overlay on template images
-        - Batch processing with error handling
-        - ZIP download of all generated images
-        """)
+            with gr.TabItem("📄 Create A4 Layouts"):
+                create_a4_layout_tab(generator)
     
     return interface
+
+def create_image_generation_tab(generator):
+    """Create the image generation tab"""
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("### 📄 Upload Files")
+            csv_file = gr.File(
+                label="CSV File", 
+                file_types=[".csv"]
+            )
+            template_file = gr.File(
+                label="Template Image", 
+                file_types=[".jpg", ".jpeg", ".png"]
+            )
+            
+            generate_btn = gr.Button("🚀 Generate Images", variant="primary", size="lg")
+        
+        with gr.Column():
+            gr.Markdown("### 📋 Expected CSV Format")
+            gr.Textbox(
+                value="""Name,URL,Price,RRP
+Nival Blanco Matt 30x60,https://tilemania.com/nival-blanco,15.00,35
+Carrara Marble Gloss 60x60,https://tilemania.com/carrara-marble,25.50,45""",
+                label="CSV Format Example (Prices will be formatted as £XX.XX/m²)",
+                lines=3,
+                interactive=False
+            )
+    
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("### 📊 Processing Log")
+            log_output = gr.Textbox(
+                label="Generation Log", 
+                lines=10, 
+                max_lines=20
+            )
+        
+        with gr.Column():
+            gr.Markdown("### 📦 Download")
+            download_file = gr.File(
+                label="Generated Images (ZIP)", 
+                interactive=False
+            )
+    
+    # Event handler
+    generate_btn.click(
+        fn=generator.process_csv_and_generate,
+        inputs=[csv_file, template_file],
+        outputs=[download_file, log_output]
+    )
+    
+    gr.Markdown("""
+    ### 📝 Instructions:
+    1. **CSV File**: Upload a CSV with columns for Name, URL/Link, Price, and RRP
+    2. **Template Image**: Upload your template image (like Ref.jpg)
+    3. **Generate**: Click the generate button to create batch images
+    4. **Download**: Get the ZIP file with all generated images
+    
+    ### 🎯 Features:
+    - Flexible column name detection (Name/Product, URL/Link, Price/Now, RRP/Was)
+    - QR code generation from URLs
+    - Text overlay on template images
+    - Batch processing with error handling
+    - ZIP download of all generated images
+    """)
+
+def create_a4_layout_tab(generator):
+    """Create the A4 layout tab"""
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("### 📁 Upload ZIP File")
+            zip_file = gr.File(
+                label="ZIP File with Images", 
+                file_types=[".zip"]
+            )
+            
+            layout_btn = gr.Button("📄 Create A4 Layouts", variant="primary", size="lg")
+        
+        with gr.Column():
+            gr.Markdown("### 📐 Layout Information")
+            gr.Markdown("""
+            **A4 Layout Specifications:**
+            - **Paper Size**: A4 (210 × 297 mm)
+            - **Resolution**: 300 DPI (print quality)
+            - **Images per page**: 12 (3 columns × 4 rows)
+            - **Margins**: 0.5 inch on all sides
+            - **Format**: PNG files ready for printing
+            """)
+    
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("### 📊 Layout Log")
+            a4_log_output = gr.Textbox(
+                label="A4 Layout Log", 
+                lines=10, 
+                max_lines=20
+            )
+        
+        with gr.Column():
+            gr.Markdown("### 📦 Download A4 Layouts")
+            a4_download_file = gr.File(
+                label="A4 Layout Pages (ZIP)", 
+                interactive=False
+            )
+    
+    # Event handler
+    layout_btn.click(
+        fn=generator.create_a4_layout,
+        inputs=[zip_file],
+        outputs=[a4_download_file, a4_log_output]
+    )
+    
+    gr.Markdown("""
+    ### 📝 A4 Layout Instructions:
+    1. **ZIP File**: Upload the ZIP file containing your generated images
+    2. **Create Layouts**: Click to arrange images on A4 pages
+    3. **Download**: Get the ZIP file with print-ready A4 layouts
+    
+    ### 🖨️ Printing Features:
+    - **High Resolution**: 300 DPI for professional printing
+    - **Optimal Layout**: 12 images per A4 page with proper margins
+    - **Multiple Pages**: Automatically creates multiple pages if needed
+    - **Print Ready**: Perfect for office or professional printing
+    """)
 
 if __name__ == "__main__":
     app = create_interface()
