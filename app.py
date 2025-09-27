@@ -20,7 +20,7 @@ class ImageGenerator:
         self.QR_SIZE = (160, 160) # QR code size
         
         # Font settings
-        self.FONT_SIZE_LARGE = 28  # For product name
+        self.FONT_SIZE_LARGE = 24  # For product name
         self.FONT_SIZE_MEDIUM = 20 # For prices
         
         # Store font paths for dynamic loading
@@ -173,8 +173,20 @@ class ImageGenerator:
                 line_y = self.NAME_POS[1] + (i * (self.FONT_SIZE_LARGE + 2))  # Add small line spacing
                 draw.text((self.NAME_POS[0], line_y), line, fill="black", font=name_font)
             # Draw prices with bold fonts
-            draw.text(self.RRP_POS, f"RRP: ${rrp_text}", fill="black", font=self.get_medium_font(bold=True))
-            draw.text(self.NOW_POS, f"Now: ${price_text}", fill="red", font=self.get_large_font(bold=True))
+            rrp_font = self.get_medium_font(bold=True)
+            rrp_full_text = f"RRP: £{rrp_text}"
+            draw.text(self.RRP_POS, rrp_full_text, fill="black", font=rrp_font)
+            
+            # Add strikethrough line to RRP text (centered vertically)
+            bbox = draw.textbbox(self.RRP_POS, rrp_full_text, font=rrp_font)
+            # Calculate the vertical center of the text more accurately
+            text_height = bbox[3] - bbox[1]
+            line_y = bbox[1] + text_height // 2  # Use bbox coordinates for precise centering
+            line_start_x = self.RRP_POS[0]
+            line_end_x = bbox[2]
+            draw.line([(line_start_x, line_y), (line_end_x, line_y)], fill="black", width=2)
+            
+            draw.text(self.NOW_POS, f"Now: £{price_text}", fill="red", font=self.get_large_font(bold=True))
             
             # Generate and paste QR code
             qr_img = self.create_qr_code(str(url))
