@@ -13,11 +13,11 @@ class ImageGenerator:
     def __init__(self):
         # Default coordinates for Ref.jpg layout (will be refined based on actual image)
         # These coordinates are estimates and should be adjusted based on the actual template
-        self.NAME_POS = (50, 50)  # Top left area for product name
-        self.RRP_POS = (50, 200)  # RRP price position
-        self.NOW_POS = (50, 250)  # Current price position
-        self.QR_POS = (300, 50)   # QR code position
-        self.QR_SIZE = (150, 150) # QR code size
+        self.NAME_POS = (15, 100)  # Top left area for product name
+        self.RRP_POS = (15, 170)  # RRP price position
+        self.NOW_POS = (15, 200)  # Current price position
+        self.QR_POS = (190, 155)   # QR code position
+        self.QR_SIZE = (160, 160) # QR code size
         
         # Font settings
         self.FONT_SIZE_LARGE = 24  # For product name
