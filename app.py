@@ -163,8 +163,16 @@ class ImageGenerator:
             
             # Wrap text if needed
             name_lines = self.wrap_text(str(name), 25)
-            price_text = str(price)
-            rrp_text = str(rrp)
+            # Format price and RRP to 2 decimal places with /m² suffix
+            try:
+                price_formatted = f"{float(price):.2f}/m²"
+            except (ValueError, TypeError):
+                price_formatted = f"{str(price)}/m²"
+            
+            try:
+                rrp_formatted = f"{float(rrp):.2f}/m²"
+            except (ValueError, TypeError):
+                rrp_formatted = f"{str(rrp)}/m²"
             
             # Draw text overlays using dynamic font sizing with bold fonts
             # Draw name text (potentially multi-line) - use bold large font
@@ -174,7 +182,7 @@ class ImageGenerator:
                 draw.text((self.NAME_POS[0], line_y), line, fill="black", font=name_font)
             # Draw prices with bold fonts
             rrp_font = self.get_medium_font(bold=True)
-            rrp_full_text = f"RRP: £{rrp_text}"
+            rrp_full_text = f"RRP: £{rrp_formatted}"
             draw.text(self.RRP_POS, rrp_full_text, fill="black", font=rrp_font)
             
             # Add strikethrough line to RRP text (centered vertically)
@@ -186,7 +194,7 @@ class ImageGenerator:
             line_end_x = bbox[2]
             draw.line([(line_start_x, line_y), (line_end_x, line_y)], fill="black", width=2)
             
-            draw.text(self.NOW_POS, f"Now: £{price_text}", fill="red", font=self.get_large_font(bold=True))
+            draw.text(self.NOW_POS, f"Now: £{price_formatted}", fill="red", font=self.get_large_font(bold=True))
             
             # Generate and paste QR code
             qr_img = self.create_qr_code(str(url))
@@ -309,7 +317,7 @@ def create_interface():
                     value="""Name,URL,Price,RRP
 Nival Blanco Matt 30x60,https://tilemania.com/nival-blanco,15.00,35
 Carrara Marble Gloss 60x60,https://tilemania.com/carrara-marble,25.50,45""",
-                    label="CSV Format Example",
+                    label="CSV Format Example (Prices will be formatted as £XX.XX/m²)",
                     lines=3,
                     interactive=False
                 )
