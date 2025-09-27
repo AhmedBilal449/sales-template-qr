@@ -5,280 +5,241 @@ import qrcode
 import zipfile
 import os
 import tempfile
-import io
-from typing import Optional, Tuple, List
-
+import shutil
+from typing import List, Tuple, Optional
+import re
 
 class ImageGenerator:
     def __init__(self):
-        self.temp_dir = None
+        # Default coordinates for Ref.jpg layout (will be refined based on actual image)
+        # These coordinates are estimates and should be adjusted based on the actual template
+        self.NAME_POS = (50, 50)  # Top left area for product name
+        self.RRP_POS = (50, 200)  # RRP price position
+        self.NOW_POS = (50, 250)  # Current price position
+        self.QR_POS = (300, 50)   # QR code position
+        self.QR_SIZE = (150, 150) # QR code size
         
-    def generate_qr_code(self, data: str, size: int = 100) -> Image.Image:
-        """Generate QR code from data string"""
+        # Font settings
+        self.FONT_SIZE_LARGE = 24  # For product name
+        self.FONT_SIZE_MEDIUM = 20 # For prices
+        
+        # Try to load a font, fallback to default
+        try:
+            self.font_large = ImageFont.truetype("arial.ttf", self.FONT_SIZE_LARGE)
+            self.font_medium = ImageFont.truetype("arial.ttf", self.FONT_SIZE_MEDIUM)
+        except:
+            self.font_large = ImageFont.load_default()
+            self.font_medium = ImageFont.load_default()
+    
+    def create_qr_code(self, url: str) -> Image.Image:
+        """Generate QR code from URL"""
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
             box_size=10,
             border=4,
         )
-        qr.add_data(data)
+        qr.add_data(url)
         qr.make(fit=True)
         
         qr_img = qr.make_image(fill_color="black", back_color="white")
-        return qr_img.resize((size, size), Image.Resampling.LANCZOS)
+        return qr_img.resize(self.QR_SIZE, Image.Resampling.LANCZOS)
     
-    def get_default_font(self, size: int = 20) -> ImageFont.ImageFont:
-        """Get default font, fallback to default if custom font not available"""
+    def truncate_text(self, text: str, max_length: int = 30) -> str:
+        """Truncate text if too long"""
+        if len(text) > max_length:
+            return text[:max_length-3] + "..."
+        return text
+    
+    def slugify(self, text: str) -> str:
+        """Convert text to filename-safe string"""
+        text = re.sub(r'[^\w\s-]', '', text).strip()
+        text = re.sub(r'[-\s]+', '-', text)
+        return text.lower()
+    
+    def generate_image(self, template_img: Image.Image, name: str, url: str, price: str, rrp: str, row_index: int) -> Tuple[Optional[Image.Image], str]:
+        """Generate a single image with overlays"""
         try:
-            # Try to use a common system font
-            return ImageFont.truetype("arial.ttf", size)
-        except:
-            try:
-                return ImageFont.truetype("DejaVuSans.ttf", size)
-            except:
-                return ImageFont.load_default()
-    
-    def overlay_text_and_qr(self, template: Image.Image, row_data: dict, row_index: int) -> Image.Image:
-        """Overlay text and QR code on template image to match tile label design"""
-        # Create a copy of the template
-        img = template.copy()
-        draw = ImageDraw.Draw(img)
-        
-        # Get image dimensions for positioning
-        width, height = img.size
-        
-        # Define fonts for different elements
-        fonts = {
-            'header': self.get_default_font(32),      # TILE MANIA
-            'product_name': self.get_default_font(28), # Product name
-            'subtitle': self.get_default_font(18),     # Wall And Floor
-            'rrp': self.get_default_font(16),          # RRP price
-            'now_price': self.get_default_font(24),    # Now price
-            'call_to_action': self.get_default_font(14), # Buy Online text
-            'checkboxes': self.get_default_font(14)    # Checkbox labels
-        }
-        
-        # Colors
-        colors = {
-            'black': (0, 0, 0),
-            'red': (220, 20, 20),
-            'white': (255, 255, 255),
-            'gray': (128, 128, 128)
-        }
-        
-        # Layout positions (adjust based on your template size)
-        margin_left = 30
-        margin_top = 60
-        
-        # 1. TILE MANIA header (top center)
-        header_text = "TILE MANIA"
-        header_bbox = draw.textbbox((0, 0), header_text, font=fonts['header'])
-        header_width = header_bbox[2] - header_bbox[0]
-        header_x = (width - header_width) // 2
-        draw.text((header_x, 20), header_text, fill=colors['black'], font=fonts['header'])
-        
-        # 2. Product name
-        product_name = str(row_data.get('name', 'Product Name'))
-        draw.text((margin_left, margin_top), product_name, fill=colors['black'], font=fonts['product_name'])
-        
-        # 3. Subtitle "Wall And Floor"
-        subtitle_y = margin_top + 35
-        draw.text((margin_left, subtitle_y), "Wall And Floor", fill=colors['black'], font=fonts['subtitle'])
-        
-        # 4. RRP with strikethrough
-        rrp_y = subtitle_y + 40
-        if 'rrp' in row_data and pd.notna(row_data['rrp']):
-            rrp_text = f"Rrp £{row_data['rrp']}"
-            draw.text((margin_left, rrp_y), rrp_text, fill=colors['gray'], font=fonts['rrp'])
+            # Create a copy of the template
+            img = template_img.copy()
+            draw = ImageDraw.Draw(img)
             
-            # Add strikethrough line
-            rrp_bbox = draw.textbbox((margin_left, rrp_y), rrp_text, font=fonts['rrp'])
-            line_y = rrp_y + (rrp_bbox[3] - rrp_bbox[1]) // 2
-            draw.line([(margin_left, line_y), (rrp_bbox[2], line_y)], fill=colors['gray'], width=2)
-        
-        # 5. "Now" price in red
-        now_y = rrp_y + 25
-        if 'price' in row_data and pd.notna(row_data['price']):
-            now_text = f"Now £{row_data['price']}/m2"
-            draw.text((margin_left, now_y), now_text, fill=colors['red'], font=fonts['now_price'])
-        
-        # 6. "Buy Online? Scan Me Now" with arrow
-        cta_y = now_y + 50
-        cta_text = "Buy Online?"
-        draw.text((margin_left, cta_y), cta_text, fill=colors['black'], font=fonts['call_to_action'])
-        
-        scan_y = cta_y + 20
-        scan_text = "Scan Me Now"
-        draw.text((margin_left, scan_y), scan_text, fill=colors['black'], font=fonts['call_to_action'])
-        
-        # Arrow pointing to QR code
-        arrow_start_x = margin_left + 100
-        arrow_y = scan_y + 8
-        arrow_end_x = width - 160
-        # Draw arrow line
-        draw.line([(arrow_start_x, arrow_y), (arrow_end_x, arrow_y)], fill=colors['black'], width=2)
-        # Draw arrowhead
-        draw.polygon([(arrow_end_x, arrow_y), (arrow_end_x-10, arrow_y-5), (arrow_end_x-10, arrow_y+5)], fill=colors['black'])
-        
-        # 7. Checkboxes at bottom
-        checkbox_y = height - 60
-        checkbox_options = ["☐ Porcelain", "☐ Ceramic", "☐ Wall", "☐ Floor"]
-        checkbox_x = margin_left
-        
-        for i, option in enumerate(checkbox_options):
-            x_pos = checkbox_x + (i * 80)  # Space checkboxes evenly
-            if x_pos + 70 < width - 150:  # Don't overlap with QR code
-                draw.text((x_pos, checkbox_y), option, fill=colors['black'], font=fonts['checkboxes'])
-        
-        # 8. Generate and overlay QR code
-        if 'url' in row_data and pd.notna(row_data['url']):
-            qr_img = self.generate_qr_code(str(row_data['url']), size=120)
-            qr_x = width - 140
-            qr_y = subtitle_y + 20
-            img.paste(qr_img, (qr_x, qr_y))
-        
-        return img
+            # Truncate text if needed
+            name_text = self.truncate_text(str(name), 25)
+            price_text = str(price)
+            rrp_text = str(rrp)
+            
+            # Draw text overlays
+            draw.text(self.NAME_POS, name_text, fill="black", font=self.font_large)
+            draw.text(self.RRP_POS, f"RRP: ${rrp_text}", fill="black", font=self.font_medium)
+            draw.text(self.NOW_POS, f"Now: ${price_text}", fill="red", font=self.font_medium)
+            
+            # Generate and paste QR code
+            qr_img = self.create_qr_code(str(url))
+            img.paste(qr_img, self.QR_POS)
+            
+            return img, f"✅ Row {row_index + 1}: Generated image for '{name}'"
+            
+        except Exception as e:
+            return None, f"❌ Row {row_index + 1}: Error generating image for '{name}': {str(e)}"
     
-    def process_csv_and_template(self, csv_file, template_file=None) -> Optional[str]:
-        """Process CSV to generate tile label images"""
-        if csv_file is None:
-            return None
+    def process_csv_and_generate(self, csv_file, template_file) -> Tuple[Optional[str], str]:
+        """Main processing function"""
+        if csv_file is None or template_file is None:
+            return None, "❌ Please upload both CSV file and template image"
         
         try:
             # Read CSV
-            df = pd.read_csv(csv_file)
+            df = pd.read_csv(csv_file.name)
             
-            # Validate CSV has required columns (case-insensitive)
-            df.columns = df.columns.str.lower()  # Convert to lowercase for consistency
-            required_columns = ['name', 'url', 'price', 'rrp']
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                raise ValueError(f"CSV missing required columns: {missing_columns}")
+            # Flexible column mapping - handle different column names
+            column_mapping = {}
+            columns = [col.lower().strip() for col in df.columns]
             
-            # Create a standard white template for tile labels (400x300 pixels)
-            template = Image.new('RGB', (400, 300), color='white')
+            # Map columns flexibly
+            for col in df.columns:
+                col_lower = col.lower().strip()
+                if col_lower in ['name', 'product', 'title']:
+                    column_mapping['name'] = col
+                elif col_lower in ['url', 'link', 'website']:
+                    column_mapping['url'] = col
+                elif col_lower in ['price', 'current_price', 'now']:
+                    column_mapping['price'] = col
+                elif col_lower in ['rrp', 'retail_price', 'original_price', 'was']:
+                    column_mapping['rrp'] = col
+            
+            # Validate required columns
+            required_fields = ['name', 'url', 'price', 'rrp']
+            missing_fields = [field for field in required_fields if field not in column_mapping]
+            
+            if missing_fields:
+                available_cols = ', '.join(df.columns)
+                return None, f"❌ Missing required columns: {', '.join(missing_fields)}. Available columns: {available_cols}"
+            
+            # Load template image
+            template_img = Image.open(template_file.name)
             
             # Create temporary directory for generated images
-            self.temp_dir = tempfile.mkdtemp()
+            temp_dir = tempfile.mkdtemp()
             generated_files = []
+            log_messages = []
+            
+            log_messages.append(f"📊 Processing {len(df)} rows from CSV")
+            log_messages.append(f"📋 Template image size: {template_img.size}")
             
             # Process each row
             for index, row in df.iterrows():
-                # Generate image for this row
-                generated_img = self.overlay_text_and_qr(template, row, index)
+                name = row[column_mapping['name']]
+                url = row[column_mapping['url']]
+                price = row[column_mapping['price']]
+                rrp = row[column_mapping['rrp']]
                 
-                # Create filename
-                product_name = str(row.get('name', f'product_{index}')).replace(' ', '_')
-                filename = f"{index:03d}_{product_name}.png"
-                filepath = os.path.join(self.temp_dir, filename)
+                # Skip rows with missing essential data
+                if pd.isna(name) or pd.isna(url) or pd.isna(price) or pd.isna(rrp):
+                    log_messages.append(f"⚠️ Row {index + 1}: Skipping due to missing data")
+                    continue
                 
-                # Save image
-                generated_img.save(filepath, 'PNG')
-                generated_files.append(filepath)
+                # Generate image
+                img, message = self.generate_image(template_img, name, url, price, rrp, index)
+                log_messages.append(message)
+                
+                if img is not None:
+                    # Save image
+                    filename = f"{index + 1:03d}_{self.slugify(str(name))}.png"
+                    filepath = os.path.join(temp_dir, filename)
+                    img.save(filepath, "PNG")
+                    generated_files.append(filepath)
+            
+            if not generated_files:
+                return None, "❌ No images were generated successfully"
             
             # Create ZIP file
-            zip_path = os.path.join(self.temp_dir, 'generated_images.zip')
+            zip_path = os.path.join(temp_dir, "generated_images.zip")
             with zipfile.ZipFile(zip_path, 'w') as zipf:
                 for file_path in generated_files:
                     zipf.write(file_path, os.path.basename(file_path))
             
-            return zip_path
+            log_messages.append(f"✅ Successfully generated {len(generated_files)} images")
+            log_messages.append(f"📦 ZIP file created with all images")
+            
+            return zip_path, "\n".join(log_messages)
             
         except Exception as e:
-            return f"Error: {str(e)}"
+            return None, f"❌ Error processing files: {str(e)}"
 
-
-def create_gradio_interface():
-    """Create and configure Gradio interface"""
+def create_interface():
+    """Create Gradio interface"""
     generator = ImageGenerator()
     
-    def process_files(csv_file):
-        """Process uploaded CSV file and return download link"""
-        if csv_file is None:
-            return "Please upload a CSV file"
-        
-        result = generator.process_csv_and_template(csv_file)
-        
-        if result and not result.startswith("Error"):
-            return result
-        else:
-            return result or "Failed to process files"
-    
-    # Create Gradio interface
-    with gr.Blocks(title="Tile Mania Label Generator") as demo:
-        gr.Markdown("""
-        # 🏠 Tile Mania Label Generator
-        
-        Upload a CSV file with your tile product data to automatically generate professional tile labels with QR codes.
-        
-        **CSV Requirements:**
-        - Must contain columns: `name`, `url`, `price`, `rrp`
-        - `name`: Product name (e.g., "Nival Blanco Matt 30x60")
-        - `url`: Website URL for QR code generation
-        - `price`: Current selling price per m2
-        - `rrp`: Recommended retail price
-        
-        **Generated Labels Include:**
-        - TILE MANIA header, product details, prices, QR code, and checkboxes
-        - Standard 400x300 pixel white background
-        - Professional tile industry formatting
-        """)
+    with gr.Blocks(title="CSV to Template Image Generator", theme=gr.themes.Soft()) as interface:
+        gr.Markdown("# 🖼️ CSV to Template Image Generator")
+        gr.Markdown("Upload a CSV file and template image to generate batch images with QR codes")
         
         with gr.Row():
             with gr.Column():
-                csv_input = gr.File(
-                    label="Upload CSV File",
-                    file_types=[".csv"],
-                    type="filepath"
+                gr.Markdown("### 📄 Upload Files")
+                csv_file = gr.File(
+                    label="CSV File", 
+                    file_types=[".csv"]
+                )
+                template_file = gr.File(
+                    label="Template Image", 
+                    file_types=[".jpg", ".jpeg", ".png"]
                 )
                 
-                generate_btn = gr.Button("Generate Tile Labels", variant="primary")
+                generate_btn = gr.Button("🚀 Generate Images", variant="primary", size="lg")
             
             with gr.Column():
-                output = gr.File(
-                    label="Download Generated Images (ZIP)",
-                    type="filepath"
+                gr.Markdown("### 📋 Expected CSV Format")
+                gr.Textbox(
+                    value="""Name,URL,Price,RRP
+Nival Blanco Matt 30x60,https://tilemania.com/nival-blanco,15.00,35
+Carrara Marble Gloss 60x60,https://tilemania.com/carrara-marble,25.50,45""",
+                    label="CSV Format Example",
+                    lines=3,
+                    interactive=False
                 )
         
-        # Connect the processing function
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("### 📊 Processing Log")
+                log_output = gr.Textbox(
+                    label="Generation Log", 
+                    lines=10, 
+                    max_lines=20
+                )
+            
+            with gr.Column():
+                gr.Markdown("### 📦 Download")
+                download_file = gr.File(
+                    label="Generated Images (ZIP)", 
+                    interactive=False
+                )
+        
+        # Event handler
         generate_btn.click(
-            fn=process_files,
-            inputs=[csv_input],
-            outputs=output
+            fn=generator.process_csv_and_generate,
+            inputs=[csv_file, template_file],
+            outputs=[download_file, log_output]
         )
         
         gr.Markdown("""
-        ### Example CSV Format:
-        ```
-        Name,URL,Price,RRP
-        Nival Blanco Matt 30x60,https://tilemania.com/nival-blanco-matt,15.00,35
-        Carrara Marble Gloss 60x60,https://tilemania.com/carrara-marble,25.50,45
-        ```
+        ### 📝 Instructions:
+        1. **CSV File**: Upload a CSV with columns for Name, URL/Link, Price, and RRP
+        2. **Template Image**: Upload your template image (like Ref.jpg)
+        3. **Generate**: Click the generate button to create batch images
+        4. **Download**: Get the ZIP file with all generated images
         
-        ### How it works:
-        1. Upload your CSV with tile product data
-        2. Click "Generate Tile Labels" 
-        3. Download the ZIP file with all generated tile labels
-        
-        Each label will include:
-        - **TILE MANIA** header (centered at top)
-        - Product name and "Wall And Floor" subtitle
-        - RRP price with strikethrough (in gray)
-        - Current price in red with "Now £X.XX/m2" format
-        - "Buy Online? Scan Me Now" call-to-action with arrow
-        - QR code (right side, generated from URL)
-        - Checkboxes for Porcelain, Ceramic, Wall, Floor (bottom)
+        ### 🎯 Features:
+        - Flexible column name detection (Name/Product, URL/Link, Price/Now, RRP/Was)
+        - QR code generation from URLs
+        - Text overlay on template images
+        - Batch processing with error handling
+        - ZIP download of all generated images
         """)
     
-    return demo
-
+    return interface
 
 if __name__ == "__main__":
-    # Create and launch the Gradio app
-    demo = create_gradio_interface()
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
-        debug=True
-    )
+    app = create_interface()
+    app.launch(share=True, debug=True)
